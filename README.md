@@ -14,11 +14,13 @@ A secure chat system with message signing, username management, and SQLite stora
 
 ### Option 1: One-Click Deploy
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/pomchat)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template/pomchat?referralCode=cascade)
 
 1. Click the "Deploy on Railway" button above
-2. Create a Railway account if you don't have one
+2. Create a Railway account if you don't have one (free tier available)
 3. Your app will be automatically deployed with HTTPS and a public URL
+4. The deployment process takes about 2-3 minutes
+5. Once deployed, you can access your app at the provided URL
 
 ### Option 2: Deploy to DigitalOcean
 
