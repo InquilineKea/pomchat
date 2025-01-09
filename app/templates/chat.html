@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}PomChat - Chat Room{% endblock %}
+
+{% block content %}
+<div class="chat-container">
+    <div class="sidebar">
+        <div class="timer-section">
+            <div class="timer-display">
+                <span id="timer-minutes">25</span>:<span id="timer-seconds">00</span>
+            </div>
+            <div class="timer-controls">
+                <button id="start-timer" class="btn-primary">
+                    <i class="fas fa-play"></i>
+                </button>
+                <button id="pause-timer" class="btn-secondary" disabled>
+                    <i class="fas fa-pause"></i>
+                </button>
+                <button id="reset-timer" class="btn-secondary">
+                    <i class="fas fa-redo"></i>
+                </button>
+            </div>
+            <div class="timer-state">
+                <span id="current-state">IDLE</span>
+            </div>
+        </div>
+        
+        <div class="rooms-section">
+            <div class="rooms-header">
+                <h3>Rooms</h3>
+                <button id="create-room" class="btn-secondary">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+            <div id="rooms-list" class="rooms-list">
+                <!-- Rooms will be dynamically added here -->
+            </div>
+        </div>
+        
+        <div class="users-section">
+            <h3>Users</h3>
+            <div id="users-list" class="users-list">
+                <!-- Users will be dynamically added here -->
+            </div>
+        </div>
+    </div>
+    
+    <div class="chat-main">
+        <div id="messages" class="messages">
+            <!-- Messages will be dynamically added here -->
+        </div>
+        
+        <form id="message-form" class="message-form">
+            <input type="text" id="message-input" placeholder="Type your message..." required>
+            <button type="submit" class="btn-primary">
+                <i class="fas fa-paper-plane"></i>
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/timer.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+{% endblock %}
