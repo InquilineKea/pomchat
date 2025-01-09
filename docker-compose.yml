@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  pomchat:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - pomchat_data:/app/data
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DB_PATH=/app/data/pomchat.db
+    restart: unless-stopped
+
+volumes:
+  pomchat_data:
