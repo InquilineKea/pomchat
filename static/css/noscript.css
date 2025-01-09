@@ -1,0 +1,23 @@
+/* Show no-JS elements */
+.nojs-only {
+    display: block !important;
+}
+
+/* Hide JS-only elements */
+.js-only {
+    display: none !important;
+}
+
+/* Ensure forms are visible */
+form {
+    display: block !important;
+}
+
+/* Add refresh button styles */
+.refresh-button {
+    margin: 10px 0;
+    padding: 5px 10px;
+    background: #eee;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
