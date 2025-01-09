@@ -2,7 +2,6 @@
 
 import json
 import os
-import subprocess
 from datetime import datetime
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -11,6 +10,50 @@ import re
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes
+from dotenv import load_dotenv
+import sqlite3
+from contextlib import contextmanager
+
+# Load environment variables
+load_dotenv()
+
+# Environment variables with defaults
+PORT = int(os.getenv('PORT', 8000))
+HOST = os.getenv('HOST', 'localhost')
+KEYS_DIR = os.getenv('KEYS_DIRECTORY', 'keys')
+DB_PATH = os.getenv('DB_PATH', 'pomchat.db')
+PRIVATE_KEY_PASSWORD = os.getenv('PRIVATE_KEY_PASSWORD', None)
+if PRIVATE_KEY_PASSWORD:
+    PRIVATE_KEY_PASSWORD = PRIVATE_KEY_PASSWORD.encode()
+DEBUG = os.getenv('DEBUG', 'false').lower() == 'true'
+
+@contextmanager
+def get_db():
+    """Context manager for database connections."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row  # This enables column access by name
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+def init_db():
+    """Initialize the database schema."""
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TIMESTAMP NOT NULL,
+                author TEXT NOT NULL,
+                type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                signature TEXT NOT NULL
+            )
+        ''')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_messages_author ON messages(author)')
+        conn.commit()
 
 class KeyManager:
     def __init__(self, keys_dir):
@@ -91,65 +134,49 @@ class KeyManager:
             return False
 
 class MessageManager:
-    def __init__(self, messages_dir, key_manager):
-        self.messages_dir = Path(messages_dir)
-        self.messages_dir.mkdir(exist_ok=True)
+    def __init__(self, key_manager):
         self.key_manager = key_manager
-    
-    def save_message(self, content, author, type='message'):
-        timestamp = datetime.now().isoformat()
-        filename = f"{datetime.now():%Y%m%d_%H%M%S}_{author}.txt"
+        init_db()
+
+    def save_message(self, content, author, msg_type='message'):
+        # Create message document
+        timestamp = datetime.now()
         signature = self.key_manager.sign_message(content)
         
-        message = f"""Date: {timestamp}
-Author: {author}
-Type: {type}
-Signature: {signature}
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute('''
+                INSERT INTO messages (date, author, type, content, signature)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (timestamp, author, msg_type, content, signature))
+            conn.commit()
+            
+            # Return the inserted message
+            c.execute('''
+                SELECT * FROM messages WHERE id = last_insert_rowid()
+            ''')
+            row = c.fetchone()
+            return dict(row)
 
-{content}"""
-        
-        with open(self.messages_dir / filename, 'w') as f:
-            f.write(message)
-        return filename
-    
-    def read_messages(self):
-        messages = []
-        for file in sorted(self.messages_dir.glob('*.txt')):
-            with open(file) as f:
-                content = f.read()
-                messages.append(self._parse_message(content))
-        return messages
-    
-    def _parse_message(self, content):
-        lines = content.split('\n')
-        headers = {}
-        message_content = []
-        in_headers = True
-        
-        for line in lines:
-            if in_headers:
-                if line == '':
-                    in_headers = False
-                    continue
-                key, value = line.split(': ', 1)
-                headers[key.lower()] = value
-            else:
-                message_content.append(line)
-        
-        return {
-            'date': headers.get('date'),
-            'author': headers.get('author'),
-            'type': headers.get('type', 'message'),
-            'signature': headers.get('signature'),
-            'content': '\n'.join(message_content)
-        }
+    def get_messages(self):
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute('SELECT * FROM messages ORDER BY date ASC')
+            return [dict(row) for row in c.fetchall()]
 
 class ChatRequestHandler(SimpleHTTPRequestHandler):
     USERNAME_PATTERN = re.compile(r'^[a-zA-Z0-9_]{3,20}$')
     
     def do_GET(self):
         if self.path == '/messages':
-            self._send_json(self.server.message_manager.read_messages())
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            messages = self.server.message_manager.get_messages()
+            self.wfile.write(json.dumps(messages, default=str).encode())
+            return
         elif self.path == '/verify_username':
             self._send_json({'username': self._get_current_username()})
         else:
@@ -160,58 +187,33 @@ class ChatRequestHandler(SimpleHTTPRequestHandler):
         body = self.rfile.read(content_len).decode() if content_len > 0 else ''
         
         if self.path == '/messages':
-            self._handle_message(body)
-        elif self.path == '/username':
-            self._handle_username_change(body)
-        else:
-            self.send_error(404)
-    
-    def _handle_message(self, body):
-        if self.headers.get('Content-Type') == 'application/json':
             try:
                 data = json.loads(body)
+                if not data.get('content'):
+                    self.send_error(400, 'Content required')
+                    return
+                
+                message = self.server.message_manager.save_message(
+                    content=data['content'],
+                    author=data.get('author', 'anonymous'),
+                    msg_type=data.get('type', 'message')
+                )
+                
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'status': 'success', 'message': message}, default=str).encode())
+                return
             except json.JSONDecodeError:
                 self.send_error(400, 'Invalid JSON')
                 return
-        else:
-            data = parse_qs(body)
-            data = {
-                'content': data.get('content', [''])[0],
-                'author': self._get_current_username(),
-                'type': 'message'
-            }
+            except Exception as e:
+                self.send_error(500, str(e))
+                return
         
-        if not data.get('content'):
-            self.send_error(400, 'Content required')
-            return
-        
-        filename = self.server.message_manager.save_message(**data)
-        self._send_json({'status': 'success', 'id': filename})
-    
-    def _handle_username_change(self, body):
-        try:
-            data = json.loads(body)
-            old_username = data['old_username']
-            new_username = data['new_username']
-        except (json.JSONDecodeError, KeyError):
-            self.send_error(400, 'Invalid request')
-            return
-        
-        if not self.USERNAME_PATTERN.match(new_username):
-            self.send_error(400, 'Invalid username format')
-            return
-        
-        if not self.server.key_manager.verify_signature(
-            json.dumps({'old_username': old_username, 'new_username': new_username}),
-            data.get('signature', ''),
-            old_username
-        ):
-            self.send_error(401, 'Invalid signature')
-            return
-        
-        self.server.key_manager.rename_public_key(old_username, new_username)
-        self._send_json({'status': 'success', 'username': new_username})
-    
+        self.send_error(404)
+
     def _get_current_username(self):
         return 'anonymous'  # For now, we'll implement proper session management later
     
@@ -226,7 +228,7 @@ def main():
         ('', int(os.getenv('PORT', 8000))),
         ChatRequestHandler
     )
-    server.message_manager = MessageManager('messages', KeyManager('keys'))
+    server.message_manager = MessageManager(KeyManager('keys'))
     print(f"Server running on port {server.server_port}")
     server.serve_forever()
 
